@@ -1,0 +1,11 @@
+langgraph>=0.2
+langgraph-checkpoint-sqlite
+langchain-core
+langchain-openai
+langchain-qdrant
+langchain-text-splitters
+qdrant-client
+fastembed
+python-dotenv
+streamlit
+pytest

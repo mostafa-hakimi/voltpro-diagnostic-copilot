@@ -1,0 +1,51 @@
+[
+  {
+    "id": "Q1",
+    "question": "What is the exact torque specification for battery M8 connection lugs?",
+    "expected_keyword": "12.0",
+    "category": "Mechanical Torque",
+    "type": "answerable"
+  },
+  {
+    "id": "Q2",
+    "question": "What standard must the battery communication cable follow in Port COMM-1?",
+    "expected_keyword": "T-568B",
+    "category": "Wiring & Pinout",
+    "type": "answerable"
+  },
+  {
+    "id": "Q3",
+    "question": "My inverter shows Error E-204 and fans are loud. What part should I clean?",
+    "expected_keyword": "AF-901",
+    "category": "Error Resolution",
+    "type": "answerable"
+  },
+  {
+    "id": "Q4",
+    "question": "What is the replacement fan part number for the inverter cooling system?",
+    "expected_keyword": "FAN-4412",
+    "category": "Spare Parts",
+    "type": "answerable"
+  },
+  {
+    "id": "Q5",
+    "question": "Check online telemetry and active alarms for serial SN-9002.",
+    "expected_keyword": "E-204",
+    "category": "Live Telemetry",
+    "type": "answerable"
+  },
+  {
+    "id": "Q6",
+    "question": "What is the maximum DC input voltage for the VoltPro-X8000 model?",
+    "expected_keywords": ["not documented", "cannot provide", "only authorized", "do not have information"],
+    "category": "Refusal / Grounding",
+    "type": "unanswerable"
+  },
+  {
+    "id": "Q7",
+    "question": "What is the recommended engine oil change interval for this unit?",
+    "expected_keywords": ["not documented", "does not utilize", "does not require", "no engine oil", "not applicable"],
+    "category": "Refusal / Grounding",
+    "type": "unanswerable"
+  }
+]

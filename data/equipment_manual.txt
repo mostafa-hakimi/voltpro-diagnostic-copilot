@@ -1,0 +1,112 @@
+=== SECTION 1: GENERAL SYSTEM SPECIFICATIONS ===
+- Unit Model: VoltPro-X9000 Industrial Hybrid Inverter & Microgrid Storage Hub.
+- Revision Identifier: Hardware Version 4.2b, Firmware Core Revision v10.4.
+- Continuous Rated Output Power: 10,000 Watts (10kW) continuous pure sine wave at 230V AC / 400V AC 3-Phase.
+- Surge Peak Overload Capacity: 15,000 Watts for 10 seconds; 20,000 Watts for 200 milliseconds motor starting current.
+- Total Harmonic Distortion (THD): Less than 2.0% at linear load; less than 3.5% at non-linear industrial load.
+- Battery Bus Architecture: 48V DC nominal (Operational range: 42.0V DC to 58.4V DC).
+- Battery Chemistry Support: Lithium Iron Phosphate (LiFePO4) with dedicated BMS communication. Lead-acid, Gel, and AGM configurations are strictly unsupported and void safety certifications.
+- Environmental Enclosure Rating: IP65 ingress protection certified according to IEC standard 60529 (Protected against multi-directional water jets and total dust ingress).
+- Operational Temperature Window: -20°C to +55°C (-4°F to 131°F). Automatic continuous derating of 250W per °C initiates when ambient temperature exceeds +45°C.
+- Maximum Acoustic Noise Level: 42 dB(A) at 1 meter during standard cooling cycle; 62 dB(A) during 100% emergency fan override.
+
+=== SECTION 2: PHOTOVOLTAIC (PV) DC INPUT SPECIFICATIONS ===
+- Number of Independent MPPT Trackers: 2 distinct hardware trackers with individual shadow-scanning algorithms.
+- Maximum DC Input Voltage (Voc): 600V DC absolute maximum open-circuit limit.
+- MPPT Voltage Operating Range: 120V DC to 550V DC nominal tracking window.
+- Minimum Start-up Voltage: 150V DC threshold before inverter initiates grid-tie synchronization.
+- Maximum Continuous Input Current: 16.0 Amperes per MPPT channel.
+- Maximum Short Circuit Current (Isc): 22.0 Amperes per string terminal.
+- DC Reverse Polarity Protection: Internal solid-state bypass diodes and fast-blow ceramic fuses.
+
+=== SECTION 3: COMPREHENSIVE DIAGNOSTIC ERROR CODES & FIELD RESOLUTIONS ===
+
+[Error Code E-101: PV Array Input Overvoltage Threshold Exceeded]
+- Trigger Condition: Total DC input voltage on either MPPT terminal exceeds 600V DC for longer than 5 milliseconds.
+- Visual Indicator: LCD backplane flashes continuous amber; audible alarm pulses at 1Hz frequency; PV contactor drops open immediately.
+- Root Cause: Sub-zero winter morning temperature coefficients causing series-string voltage to spike above nominal rating.
+- Step-by-Step Remediation:
+  1. Rotate main external DC Isolator switch to OFF position.
+  2. Don Class 0 (1000V rated) electrical safety gloves and eye protection.
+  3. Measure open circuit voltage with calibrated digital multimeter across PV1+ and PV1-.
+  4. If measured voltage is > 585V DC, calculate temperature coefficient and physically rewire array to reduce string count by 1 to 2 modules.
+  5. Never disconnect MC4 connectors while inverter is attempting active MPPT sweep.
+
+[Error Code E-102: PV Insulation Resistance Low / Ground Fault Alert]
+- Trigger Condition: Measured insulation impedance between PV array conductors and earth ground drops below 50 kOhm.
+- Visual Indicator: Solid Red Alarm LED; system lockout.
+- Root Cause: Damaged cable insulation, condensation inside external junction box, or conduit pinched by roof mounting brackets.
+- Step-by-Step Remediation:
+  1. Power down inverter and isolate AC and DC disconnects.
+  2. Disconnect PV string negative and positive lines from inverter terminals.
+  3. Perform 500V Megohmmeter insulation resistance test between positive lead and ground, then negative lead and ground.
+  4. Isolate individual panels until faulty junction box or abraded wire harness is located and replaced.
+
+[Error Code E-204: Power Module Heat Exchanger Thermal Overload]
+- Trigger Condition: Internal IGBT temperature sensor registers > 95°C or ambient chassis heatsink registers > 80°C.
+- Visual Indicator: Error Code E-204 displayed; output power dynamically throttles down to 30% or drops into bypass.
+- Root Cause: Severe dust obstruction on bottom air intake filters, cooling fan mechanical failure, or insufficient wall clearances.
+- Step-by-Step Remediation:
+  1. Inspect bottom air intake filter assembly Part #AF-901. Clean with dry compressed air (< 30 PSI).
+  2. Verify clearances: Minimum 30cm clearance from left and right side panels; 50cm clearance from top ceiling.
+  3. Navigate to LCD [Diagnostics -> System Status -> Fan Speeds]. If RPM reads 0 while temperature is > 65°C, replace Fan Assembly Part #FAN-4412.
+  4. Allow 20 minutes cooling period before clearing alarm latch via LCD menu.
+
+[Error Code E-312: Battery Management System (BMS) Communication Timeout]
+- Trigger Condition: Inverter fails to receive heartbeat data packet over CAN-bus from Master Battery module for 15 consecutive seconds.
+- Visual Indicator: Red Battery LED blinks; power drops to grid-pass-through mode; charging stops immediately.
+- Root Cause: Disconnected RJ45 communication patch cable, ground-loop electrical noise, or missing 120-Ohm bus termination resistor.
+- Step-by-Step Remediation:
+  1. Inspect communication cable in Port COMM-1. Must be high-grade shielded Cat6 cable terminated to T-568B standard.
+  2. Verify pinout: Pin 4 = CAN-H (Blue), Pin 5 = CAN-L (Blue/White), Pin 2 = Ground shield.
+  3. Ensure DIP Switch #1 on the master battery terminal is toggled to ON position (engaging 120 Ohm termination).
+  4. Perform complete hard reboot: Switch off DC battery breaker, wait 60 seconds for capacitors to discharge, reboot battery pack first, then inverter second.
+
+[Error Code E-405: Utility Grid Loss & Active Anti-Islanding Protection]
+- Trigger Condition: Grid voltage drops below 180V AC, rises above 265V AC, or grid frequency departs from 49.5Hz - 50.5Hz band.
+- Visual Indicator: Warning Code E-405; grid relay clicks open within 16 milliseconds; system transitions to Emergency Power Supply (EPS).
+- Root Cause: Local municipal power blackout, regional rolling brownout, or utility transformer maintenance.
+- Step-by-Step Remediation:
+  1. Check main electrical distribution panel 63A double-pole AC circuit breaker.
+  2. Use multimeter to measure line-to-neutral voltage at AC Grid terminals. If grid is verified present at 230V AC, calibrate grid voltage sensor via Service Menu.
+  3. If true grid outage exists, system operates normally on EPS backup mode provided battery state of charge (SoC) is greater than 15%.
+
+[Error Code E-509: DC Bus Pre-Charge Relay Contact Failure]
+- Trigger Condition: Inverter internal DC bus capacitors fail to achieve 90% of nominal battery voltage within 2.5 seconds of contactor closure.
+- Visual Indicator: Flashing red warning light; loud clicking sound; automatic restart lockout.
+- Root Cause: Blown internal pre-charge ceramic resistor, welded relay contacts, or catastrophic internal short-circuit.
+- Step-by-Step Remediation:
+  1. This is a critical hardware level failure. Do not attempt repeated manual reboots.
+  2. Isolate all DC and AC sources completely.
+  3. Wait 10 minutes for capacitor discharge.
+  4. Contact certified technical repair tier; requires Main Logic Board replacement Part #MB-9901.
+
+=== SECTION 4: SPARE PARTS CATALOG & REPLACEMENT IDENTIFIERS ===
+- Part #FAN-4412: Dual ball-bearing 120mm brushless DC cooling fan (12V DC, 0.45A, 4-pin PWM tachometer feedback, 50,000-hour rated lifespan).
+- Part #AF-901: Washable 50-micron stainless steel wire-mesh air intake filter cartridge (sold in sets of 2).
+- Part #SPD-600: Type II plug-in DC Surge Protective Device replacement cartridge (600V DC operational, 40kA nominal discharge current).
+- Part #REL-882: Heavy-duty 63A 400V 4-Pole automatic transfer contactor switch (35mm DIN-rail mounted).
+- Part #MB-9901: Main Control Logic Motherboard pre-flashed with secure industrial firmware v10.4.
+- Part #FUSE-30A: 1000V DC, 30 Amp 10x38mm ultra-fast acting ceramic solar cartridge fuse for DC input overcurrent protection.
+- Part #CT-100: Split-core 100A / 50mA current transformer for external grid consumption monitoring and zero-export control.
+- Part #WIFI-DONGLE-3: IP65 screw-on Wi-Fi/Ethernet data logger module with hardware encryption chip.
+
+=== SECTION 5: PREVENTATIVE MAINTENANCE PROTOCOLS & INTERVALS ===
+[Quarterly Maintenance Checklist - Site Technician]
+1. Visual inspection of all IP65 cable glands, conduits, and ventilation louvers for insect nesting or water ingress.
+2. Filter maintenance: Extract Part #AF-901 and wash using neutral cleaning solution or low-pressure air. Dry thoroughly before reinstalling.
+3. LCD touchscreen diagnostic check: Verify clock drift is less than 3 seconds; verify error log history for transient warnings.
+
+[Annual Maintenance Checklist - Licensed Master Electrician Only]
+1. Mechanical fastener torque audit with certified torque wrench:
+   - Battery M8 Connection Lugs: Exactly 12.0 Newton-meters (Nm) / 106 inch-pounds.
+   - AC Terminal M6 Compression Clamps: Exactly 3.5 Newton-meters (Nm) / 31 inch-pounds.
+   - Grounding Earth PE Stud (M6): Exactly 4.0 Newton-meters (Nm).
+2. Thermal Imaging Survey: Under minimum 70% full inverter load, capture thermal image of all terminal blocks. Any delta-T exceeding 15°C above surrounding ambient conductor temperature warrants immediate wire stripping and re-crimping.
+3. Rapid Shutdown & Anti-Islanding validation: Simulate grid disconnect by opening main AC breaker. Inverter must isolate grid connection in under 20 milliseconds.
+
+=== SECTION 6: SAFETY DIRECTIVES, CAPACITOR DISCHARGE & WARRANTY RESTRICTIONS ===
+- Lethal High Voltage Warning: Internal DC bus capacitors store lethal electrical potential (> 450V DC) even after all AC and DC sources have been isolated.
+- Mandatory Waiting Period: Maintenance personnel must wait a minimum of 10 full minutes following total disconnection before removing outer aluminum chassis cover. Measure voltage across DC bus test points TP1 and TP2; verify voltage is below 12V DC before touching internal circuitry.
+- Approved Battery Chemistries: The 10-Year Manufacturer Warranty is valid solely when paired with approved LiFePO4 battery modules equipped with approved communication firmware. Connecting flooded lead-acid, DIY cylindrical cells, or unmonitored battery packs voids warranty immediately and unconditionally.
+- Maximum Allowed Voltage Guarantee: Exposure to open-circuit voltages greater than 600V DC at any duration invalidates all component warranty guarantees.
