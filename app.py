@@ -1,3 +1,5 @@
+from core.observability import setup_observability, get_telemetry_callbacks
+setup_observability()
 import uuid
 
 import streamlit as st
@@ -7,7 +9,6 @@ from core.graph import support_app
 
 st.set_page_config(
     page_title="VoltPro Diagnostic Copilot",
-    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -99,12 +100,13 @@ with st.sidebar:
     st.info("Qdrant Vector Store: Connected")
     st.caption(f"Thread: {st.session_state.current_thread_id[:18]}...")
 
-st.title("⚡ VoltPro Diagnostic Copilot")
+st.title("VoltPro Diagnostic Copilot")
 st.caption("Agentic hardware diagnostics — manual RAG, live telemetry, and parts lookup")
 
 config = {
     "configurable": {"thread_id": st.session_state.current_thread_id},
     "recursion_limit": 25,
+    "callbacks": get_telemetry_callbacks(),
 }
 current_state = support_app.get_state(config)
 

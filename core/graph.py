@@ -1,7 +1,9 @@
+"""LangGraph orchestration graph for VoltPro Diagnostic Copilot."""
+
 import os
 import sqlite3
-
 from dotenv import load_dotenv
+
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, RemoveMessage
 from langgraph.graph import StateGraph, START
@@ -10,8 +12,13 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from core.state import AgentState
 from core.tools import tools
+from core.observability import setup_observability
 
 load_dotenv()
+setup_observability()
+
+MAX_MESSAGES_BEFORE_SUMMARY = 12
+KEEP_RECENT = 4
 
 SYSTEM_PROMPT = SystemMessage(content="""You are the Lead Technical Diagnostic Copilot for VoltPro-X9000 Industrial Systems.
 
@@ -39,75 +46,71 @@ CRITICAL OPERATIONAL RULES:
    asked before and returned no result. Only after a genuine tool call comes back empty or irrelevant should you
    say: 'This specification is not documented in the official VoltPro-X9000 service manual.' Do not invent values.""")
 
-# ---------------------------------------------------------------------------
-# Conversation summarization
-# ---------------------------------------------------------------------------
-# Without this, state["messages"] grows without bound for a long-running
-# thread: every turn re-sends the entire history to the LLM, which raises
-# cost and latency linearly and will eventually exceed the model's context
-# window. Once a thread passes MAX_MESSAGES_BEFORE_SUMMARY, everything except
-# the most recent KEEP_RECENT messages is collapsed into a single summary
-# message (using the same LLM, without tools bound, since this is a plain
-# text-in/text-out task).
-MAX_MESSAGES_BEFORE_SUMMARY = 12
-KEEP_RECENT = 4
 
-llm = ChatOpenAI(
-    model="google/gemma-4-31b-it",
-    base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-    temperature=0,
-)
-llm_with_tools = llm.bind_tools(tools)
+def build_graph(llm=None, checkpointer=None):
+    """Builds the compiled LangGraph workflow with dependency-injected LLM and checkpointer."""
+    if llm is None:
+        llm = ChatOpenAI(
+            model=os.getenv("LLM_MODEL", "google/gemma-4-31b-it"),
+            base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            temperature=0,
+        )
+
+    llm_with_tools = llm.bind_tools(tools)
+
+    def summarize_if_needed(state: AgentState):
+        messages = state["messages"]
+        if len(messages) <= MAX_MESSAGES_BEFORE_SUMMARY:
+            return {}
+
+        old_messages = messages[:-KEEP_RECENT]
+        summary_prompt = [
+            SystemMessage(content=(
+                "Summarize the following technical support conversation in 3-4 sentences. "
+                "Preserve any error codes, serial numbers, and part numbers mentioned — they matter "
+                "more than the surrounding conversational text."
+            )),
+            *old_messages,
+        ]
+        summary_response = llm.invoke(summary_prompt)
+        summary_message = SystemMessage(content=f"[Earlier conversation summary]: {summary_response.content}")
+
+        return {
+            "messages": [RemoveMessage(id=m.id) for m in old_messages] + [summary_message]
+        }
+
+    def chatbot_node(state: AgentState):
+        messages_with_system = [SYSTEM_PROMPT] + list(state["messages"])
+        return {"messages": [llm_with_tools.invoke(messages_with_system)]}
+
+    tool_node = ToolNode(tools=tools, handle_tool_errors=True)
+
+    builder = StateGraph(AgentState)
+    builder.add_node("summarize", summarize_if_needed)
+    builder.add_node("chatbot", chatbot_node)
+    builder.add_node("tools", tool_node)
+
+    builder.add_edge(START, "summarize")
+    builder.add_edge("summarize", "chatbot")
+    builder.add_conditional_edges("chatbot", tools_condition)
+    builder.add_edge("tools", "chatbot")
+
+    return builder.compile(checkpointer=checkpointer)
 
 
-def summarize_if_needed(state: AgentState):
-    messages = state["messages"]
-    if len(messages) <= MAX_MESSAGES_BEFORE_SUMMARY:
-        return {}
-
-    old_messages = messages[:-KEEP_RECENT]
-
-    summary_prompt = [
-        SystemMessage(content=(
-            "Summarize the following technical support conversation in 3-4 sentences. "
-            "Preserve any error codes, serial numbers, and part numbers mentioned — they matter "
-            "more than the surrounding conversational text."
-        )),
-        *old_messages,
-    ]
-    summary_response = llm.invoke(summary_prompt)
-    summary_message = SystemMessage(content=f"[Earlier conversation summary]: {summary_response.content}")
-
-    return {
-        "messages": [RemoveMessage(id=m.id) for m in old_messages] + [summary_message]
-    }
+_app = None
 
 
-def chatbot_node(state: AgentState):
-    messages_with_system = [SYSTEM_PROMPT] + list(state["messages"])
-    response = llm_with_tools.invoke(messages_with_system)
-    return {"messages": [response]}
+def get_app():
+    """Returns the singleton production graph with persistent SQLite checkpointing."""
+    global _app
+    if _app is None:
+        conn = sqlite3.connect("customer_support.db", check_same_thread=False)
+        checkpointer = SqliteSaver(conn)
+        _app = build_graph(checkpointer=checkpointer)
+    return _app
 
 
-# handle_tool_errors=True is set explicitly rather than relying on the
-# library default: that default has changed across langgraph-prebuilt
-# releases, so a tool raising an exception (e.g. a transient Qdrant read
-# failure) is guaranteed to come back to the model as a ToolMessage instead
-# of crashing the whole graph run.
-tool_node = ToolNode(tools=tools, handle_tool_errors=True)
-
-builder = StateGraph(AgentState)
-builder.add_node("summarize", summarize_if_needed)
-builder.add_node("chatbot", chatbot_node)
-builder.add_node("tools", tool_node)
-
-builder.add_edge(START, "summarize")
-builder.add_edge("summarize", "chatbot")
-builder.add_conditional_edges("chatbot", tools_condition)
-builder.add_edge("tools", "chatbot")
-
-conn = sqlite3.connect("customer_support.db", check_same_thread=False)
-checkpointer = SqliteSaver(conn)
-
-support_app = builder.compile(checkpointer=checkpointer)
+# Backwards compatibility for app.py and evaluate.py
+support_app = get_app()

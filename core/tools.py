@@ -1,3 +1,5 @@
+"""Technical tools and Qdrant RAG retrieval for VoltPro-X9000."""
+
 import os
 import re
 from pathlib import Path
@@ -13,63 +15,61 @@ from fastembed import TextEmbedding
 
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Embeddings
-# ---------------------------------------------------------------------------
-# Runs fully locally via ONNX Runtime (fastembed) — no API key, no network
-# call at query time, no external service to be rate-limited or return an
-# auth error. The model is downloaded and cached once on first run.
-# BAAI/bge-small-en-v1.5 is fastembed's own default: a small model that
-# scores better on retrieval benchmarks than all-MiniLM-L6-v2 while staying
-# at the same 384 dimensions, so no other config needs to change.
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIM = 384
-_fastembed_model = TextEmbedding(model_name=EMBEDDING_MODEL)
+
+_fastembed_model = None
+
+def get_fastembed_model():
+    global _fastembed_model
+    if _fastembed_model is None:
+        _fastembed_model = TextEmbedding(model_name=EMBEDDING_MODEL)
+    return _fastembed_model
 
 
 class ReliableEmbeddings(Embeddings):
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return [vec.tolist() for vec in _fastembed_model.embed(texts)]
+        model = get_fastembed_model()
+        return [vec.tolist() for vec in model.embed(texts)]
 
     def embed_query(self, text: str) -> list[float]:
-        return next(iter(_fastembed_model.embed([text]))).tolist()
+        model = get_fastembed_model()
+        return next(iter(model.embed([text]))).tolist()
 
 
 embeddings = ReliableEmbeddings()
 
-# ---------------------------------------------------------------------------
-# Qdrant (local/embedded — see docs/scaling.md for the cloud migration path)
-# ---------------------------------------------------------------------------
 QDRANT_DIR = "./qdrant_storage"
-client = QdrantClient(path=QDRANT_DIR)
 COLLECTION_NAME = "voltpro_manuals"
 
-if not client.collection_exists(COLLECTION_NAME):
-    client.create_collection(
-        collection_name=COLLECTION_NAME,
-        vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE),
-    )
+_client = None
+_vector_store = None
 
-vector_store = QdrantVectorStore(
-    client=client,
-    collection_name=COLLECTION_NAME,
-    embedding=embeddings,
-)
+def get_qdrant_client():
+    global _client
+    if _client is None:
+        _client = QdrantClient(path=QDRANT_DIR)
+    return _client
 
-# ---------------------------------------------------------------------------
-# Structure-aware chunking
-# ---------------------------------------------------------------------------
-# The manual isn't generic prose — it's organized into "=== SECTION N: ... ==="
-# blocks, and within Section 3 into "[Error Code E-xxx: ...]" blocks. Splitting
-# by raw character count cuts these blocks apart (e.g. separating an error's
-# Trigger Condition from its Remediation steps), which silently degrades
-# answer quality without ever raising an exception. Instead we split on the
-# document's own structural boundaries and attach section/error-code metadata
-# to each chunk so retrieval results can be cited, not just quoted.
+def get_vector_store():
+    global _vector_store
+    if _vector_store is None:
+        client = get_qdrant_client()
+        if not client.collection_exists(COLLECTION_NAME):
+            client.create_collection(
+                collection_name=COLLECTION_NAME,
+                vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE),
+            )
+        _vector_store = QdrantVectorStore(
+            client=client,
+            collection_name=COLLECTION_NAME,
+            embedding=embeddings,
+        )
+    return _vector_store
+
 
 SECTION_PATTERN = re.compile(r"(===\s*SECTION\s+(\d+):[^\n]*===)")
 ERROR_CODE_PATTERN = re.compile(r"\[Error Code (E-\d+)")
-
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "equipment_manual.txt"
 
 
@@ -77,7 +77,6 @@ def _split_into_structured_chunks(raw_text: str) -> list[Document]:
     parts = SECTION_PATTERN.split(raw_text)
     docs: list[Document] = []
 
-    # re.split with a capturing group interleaves: [pre, header, section_num, body, header, section_num, body, ...]
     preamble = parts[0].strip()
     if preamble:
         docs.append(Document(page_content=preamble, metadata={"section": "0"}))
@@ -86,8 +85,6 @@ def _split_into_structured_chunks(raw_text: str) -> list[Document]:
         header, section_num, body = parts[i], parts[i + 1], parts[i + 2]
         body = body.strip()
 
-        # Within Section 3, further split on individual error-code blocks so
-        # each error's full trigger/cause/remediation stays together.
         error_blocks = re.split(r"(?=\[Error Code E-\d+)", body)
         for block in error_blocks:
             block = block.strip()
@@ -105,29 +102,27 @@ def _split_into_structured_chunks(raw_text: str) -> list[Document]:
 
 def initialize_knowledge_base():
     """Indexes the manual into Qdrant using structure-aware chunks, if not already indexed."""
+    client = get_qdrant_client()
+    vs = get_vector_store()
     collection_info = client.get_collection(COLLECTION_NAME)
     if collection_info.points_count == 0:
-        print("[INFO] Indexing technical documentation into Qdrant (structure-aware chunking)...")
+        print("[INFO] Indexing technical documentation into Qdrant...")
         raw_text = DATA_PATH.read_text(encoding="utf-8")
         docs = _split_into_structured_chunks(raw_text)
-        vector_store.add_documents(docs)
+        vs.add_documents(docs)
         print(f"[SUCCESS] Indexed {len(docs)} structured chunks into Qdrant.")
     else:
         print("[READY] Technical documentation collection already initialized in Qdrant.")
 
 
-initialize_knowledge_base()
-
-
-# ---------------------------------------------------------------------------
-# Tools
-# ---------------------------------------------------------------------------
 @tool
 def search_technical_manual(query: str) -> str:
     """Searches the official VoltPro-X9000 service manual for diagnostic error codes,
     mechanical torque specs, wiring pinouts, and field maintenance procedures.
     Returns each result tagged with its source section and error code, if any."""
-    results = vector_store.similarity_search(query, k=3)
+    initialize_knowledge_base()
+    vs = get_vector_store()
+    results = vs.similarity_search(query, k=3)
     formatted = []
     for doc in results:
         section = doc.metadata.get("section", "?")
@@ -169,3 +164,6 @@ def lookup_spare_part(part_number: str) -> str:
 
 
 tools = [search_technical_manual, lookup_device_telemetry, lookup_spare_part]
+
+if __name__ == "__main__":
+    initialize_knowledge_base()

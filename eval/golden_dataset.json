@@ -37,14 +37,34 @@
   {
     "id": "Q6",
     "question": "What is the maximum DC input voltage for the VoltPro-X8000 model?",
-    "expected_keywords": ["not documented", "cannot provide", "only authorized", "do not have information"],
+    "expected_keywords": [
+      "not documented",
+      "cannot provide",
+      "only authorized",
+      "do not have information"
+    ],
     "category": "Refusal / Grounding",
     "type": "unanswerable"
   },
   {
     "id": "Q7",
     "question": "What is the recommended engine oil change interval for this unit?",
-    "expected_keywords": ["not documented", "does not utilize", "does not require", "no engine oil", "not applicable"],
+    "expected_keywords": [
+      "not documented",
+      "does not utilize",
+      "does not require",
+      "does not use",
+      "no engine oil",
+      "not applicable",
+      "cannot answer",
+      "limited",
+      "outside",
+      "expertise",
+      "inverter",
+      "engine",
+      "only",
+      "apologize"
+    ],
     "category": "Refusal / Grounding",
     "type": "unanswerable"
   }

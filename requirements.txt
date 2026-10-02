@@ -9,3 +9,5 @@ fastembed
 python-dotenv
 streamlit
 pytest
+langfuse>=2.0.0
+langchain

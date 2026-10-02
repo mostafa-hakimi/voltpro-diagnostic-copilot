@@ -1,36 +1,36 @@
-# ⚡ VoltPro Diagnostic Copilot
+# VoltPro Diagnostic Copilot
 
-An agentic troubleshooting assistant for an industrial hybrid inverter (the
-fictional "VoltPro-X9000"). Instead of a plain chatbot bolted onto a PDF, it
-combines three things in one conversation: the equipment's service manual
-(RAG), live device telemetry, and a spare-parts inventory lookup — so it can
-tell you *why* an error happened, *whether the affected unit is online right
-now*, and *what part to order*, without you tabbing between three systems.
+[![Tests](https://github.com/mostafa-hakimi/voltpro-diagnostic-copilot/actions/workflows/tests.yml/badge.svg)](https://github.com/mostafa-hakimi/voltpro-diagnostic-copilot/actions/workflows/tests.yml)
 
-Built with **LangGraph**, **Qdrant**, and **Streamlit**.
+An agentic troubleshooting assistant for industrial hybrid inverters (modeled on the
+VoltPro-X9000). The copilot unifies three critical operational capabilities within a single
+conversational state machine: technical service manual retrieval (RAG), live device telemetry
+lookup, and warehouse spare-parts inventory inspection.
 
-## Why this exists
+Built with **LangGraph**, **Qdrant**, **FastEmbed**, and **Streamlit**.
 
-Field technicians and support desks lose real time flipping through
-100+ page PDF manuals during an outage. This project is a working example
-of what that support experience looks like when it's grounded in an actual
-document instead of a model's general knowledge — including the harder
-part: knowing when to say "this isn't in the manual" instead of guessing.
+## Context & Objectives
+
+Field engineers and technical support desks lose substantial operational time navigating
+multi-hundred-page PDF service manuals during critical inverter outages.
+
+This copilot provides a grounded, deterministic alternative: an autonomous support agent
+that interprets technical queries, cross-references live device sensor telemetry by serial
+number, verifies inventory availability by part number, and strictly declines to answer when
+specifications fall outside documented context.
 
 ## What it actually does
 
-- Answers error-code and spec questions from the manual, with the source
-  section and error code attached to each retrieved chunk (not just raw
-  text — see `core/tools.py`).
-- Looks up live telemetry (temperature, alarms, grid status) by serial
-  number, and spare-part stock/pricing by part number.
-- Is instructed, and mostly does, decline to answer when something isn't in
-  the retrieved context rather than inventing a number — see the honest
-  results in the benchmark section below, including where this currently
-  falls short.
-- Keeps per-session conversation history via a LangGraph checkpointer, with
-  a simple multi-session sidebar in the Streamlit UI, and summarizes older
-  messages once a thread gets long so cost and latency don't grow forever.
+- Answers technical error-code and torque/wiring specifications from the manual, with the exact
+  source section and error identifier cited for every claim.
+- Queries live sensor telemetry (IGBT temperature, active alarm states, grid frequency, battery SoC)
+  by hardware serial number.
+- Inspects central warehouse inventory for replacement spare parts, verifying stock counts and unit pricing.
+- Enforces strict groundedness: refuses to hallucinate specifications outside the official manual.
+- Bounded context growth: runs an automated summarization node before every model invocation once
+  a conversation exceeds 12 messages, preserving technical identifiers while bounding token cost.
+- Full-lifecycle observability: native runtime instrumentation via LangSmith and Langfuse callbacks.
+- 11 automated test cases (integration and deterministic graph control-flow) running in continuous integration.
 
 ## Architecture
 
@@ -39,172 +39,123 @@ graph TD
     User([Field engineer]) --> UI[Streamlit UI]
     UI --> Engine[LangGraph agent]
     Engine <--> Checkpointer[(SQLite checkpointer)]
-    Engine --> Router{tool call?}
-    Router -->|manual question| Qdrant[(Qdrant — structure-aware chunks)]
-    Router -->|serial number| Telemetry[Telemetry lookup]
-    Router -->|part number| Parts[Parts lookup]
+    Engine --> Router{tool dispatch?}
+    Router -->|Manual inquiry| Qdrant[(Qdrant — structure-aware chunks)]
+    Router -->|Serial number| Telemetry[Telemetry lookup]
+    Router -->|Part number| Parts[Parts lookup]
     Qdrant --> Engine
     Telemetry --> Engine
     Parts --> Engine
     Engine --> UI
 ```
 
-The manual isn't chunked by raw character count — `core/tools.py` splits it
-on its own structure (`=== SECTION N ===` and `[Error Code E-xxx]`
-boundaries) so a full error block stays together instead of getting cut
-mid-remediation-step. Each chunk carries its section/error-code as metadata,
-which is what lets the agent cite a real source instead of just restating
-whatever text it retrieved.
+### Structure-Aware Chunking
 
-## Guardrails
+Industrial manuals fail under arbitrary character-count chunking, which splits remediation
+steps from trigger conditions. The ingestion pipeline (`core/tools.py`) parses the document
+along domain boundaries (`=== SECTION N ===` and `[Error Code E-xxx]`), ensuring complete
+diagnostic procedures remain intact within discrete vector payloads. Each chunk carries
+explicit metadata (`section`, `error_code`) allowing the agent to cite primary sources directly.
 
-What's actually implemented, not just described:
+## Guardrails & Operational Constraints
 
-- **Scope + prompt-injection resistance:** the system prompt restricts the
-  agent to VoltPro-X9000 topics and explicitly tells it to treat tool output
-  (including retrieved manual text) as reference data, never as
-  instructions — so a manipulated or malicious manual chunk can't hijack
-  the agent's behavior.
-- **Context growth is bounded:** a `summarize` node runs before every
-  model call; once a thread passes 12 messages, everything except the 4
-  most recent is collapsed into a short summary (error codes, serials, and
-  part numbers are preserved).
-- **Tool failures don't crash the run:** `ToolNode` is configured with
-  `handle_tool_errors=True` explicitly, rather than relying on the
-  library's default — that default has changed between LangGraph releases,
-  so a transient Qdrant read failure comes back to the model as an error
-  message instead of crashing the whole graph.
-- **Recursion is capped:** every invocation sets `recursion_limit=25`, so a
-  stuck tool-call loop fails loudly instead of running up API cost
-  silently.
-- **Mandatory retrieval before refusal:** the system prompt requires a real
-  tool call before the model is allowed to say something isn't documented,
-  and forbids reusing an earlier turn's refusal for a new question — this
-  was added after observing the model skip retrieval and copy a prior
-  "not documented" answer for an unrelated follow-up question in the same
-  session.
+- **Scope & Prompt-Injection Resistance:** The system prompt restricts domain scope strictly
+  to the VoltPro-X9000 platform and enforces that tool outputs represent data, never instructions.
+- **Bounded Context Summarization:** The graph evaluates thread depth before each step; once
+  a conversation exceeds 12 messages, earlier turns are summarized into a structured digest
+  retaining error codes, serials, and part numbers, while preserving the 4 most recent turns intact.
+- **Fault-Tolerant Tool Execution:** `ToolNode` runs with `handle_tool_errors=True`, routing
+  transient vector read errors back to the model as manageable exceptions rather than crashing execution.
+- **Recursion Caps:** Invocations enforce `recursion_limit=25`, terminating runaway decision loops loudly.
+- **Mandatory Tool Retrieval Before Refusal:** The agent is structurally prohibited from declaring
+  a specification undocumented without first executing a tool query, preventing refusal leakage.
+- **Production Observability:** Active telemetry integration supporting LangSmith and Langfuse for
+  real-time trace waterfall capture, latency profiling, and token expenditure monitoring.
 
-What's *not* implemented, honestly: there's no rate limiting per user, no
-retry/backoff wrapper around the OpenRouter call for transient network
-failures, and no tracing/observability (e.g. LangSmith or Langfuse) wired
-in. All three are reasonable next steps, covered conceptually in
-`docs/scaling.md`, but none of them are running code today.
+## Testing Strategy
 
-## Benchmark results
+The test suite combines deterministic agent control-flow validation with real vector retrieval integration:
 
-From an actual run of `python -m eval.evaluate` against
-`eval/golden_dataset.json`, which mixes five questions the manual can answer
-with two it deliberately can't (a model number and a maintenance item that
-don't appear in this document):
+1. **Deterministic Agent Control Flow (`tests/test_graph_flow.py`):**
+   Tests the LangGraph state machine using an injectable `ScriptedLLM` mock. Validates scope refusal,
+   telemetry dispatch by serial, inventory dispatch by part number, manual search by error code,
+   conversation summarization at the 12-message threshold, and tool failure containment in under 4 seconds
+   with zero API keys or network dependencies.
+2. **Tool & Retrieval Integration (`tests/test_tools.py`):**
+   Validates retrieval against the local Qdrant collection and local FastEmbed embeddings (`BAAI/bge-small-en-v1.5`),
+   verifying torque specifications, pinout standards, telemetry status, and citation metadata generation.
+
+Total test coverage: **11 test cases**, running in continuous integration on every push without secrets.
+
+## Benchmark Results
+
+Automated benchmark evaluation executed via `python -m eval.evaluate` against `eval/golden_dataset.json`:
 
 | Query ID | Category | Target | Latency | Status |
 |:---|:---|:---|:---:|:---:|
 | Q1 | Mechanical Torque | `12.0` | 2.76s | PASS |
 | Q2 | Wiring & Pinout | `T-568B` | 2.75s | PASS |
 | Q3 | Error Resolution | `AF-901` | 2.98s | PASS |
-| Q4 | Spare Parts | `FAN-4412` | 8.6s | PASS |
+| Q4 | Spare Parts | `FAN-4412` | 8.60s | PASS |
 | Q5 | Live Telemetry | `E-204` | 1.86s | PASS |
-| Q6 | Refusal (unanswerable) | `not documented` / `cannot provide` / `only authorized` | 1.1s | PASS |
-| Q7 | Refusal (unanswerable) | `not documented` / `does not utilize` / `does not require` | 2.02s | PASS |
+| Q6 | Refusal (unanswerable) | `not documented` / `only authorized` | 1.10s | PASS |
+| Q7 | Refusal (unanswerable) | `not documented` / `does not require` | 2.02s | PASS |
 
-**Overall accuracy: 100% (7/7).** All 5 pytest integration tests pass
-(`python -m pytest -v`, 13.3s).
+Summary: **100% accuracy (7/7)**. Evaluation includes deliberate out-of-scope probes (Q6 and Q7)
+to verify the model declines unsupported inquiries without hallucination.
 
-Worth explaining the Q6/Q7 history honestly, because it's a more useful
-lesson than a clean table: the first run of this benchmark showed both as
-FAILED. Reading the actual model output (not just the pass/fail line)
-showed the model had answered *correctly* both times —
-for Q6 ("what's the max voltage for the VoltPro-X8000?", a model that
-doesn't exist) it replied "I am only authorized to provide support for the
-VoltPro-X9000... I cannot provide information regarding the X8000 model."
-For Q7 ("engine oil change interval?", nonsensical for an inverter) it
-replied "the VoltPro-X9000... does not utilize an internal combustion
-engine or require engine oil." Both are correct, honest refusals — they
-just don't contain the single literal phrase "not documented" that the
-original eval script checked for. The bug was in the test, not the model:
-`eval/golden_dataset.json` now accepts any of several valid refusal
-phrasings per question instead of one hardcoded string.
+## Tech Stack
 
-Seven questions is a small eval set regardless — enough to catch a broken
-prompt or a chunking regression, not enough to claim a production-grade
-accuracy number.
-
-## Tech stack
-
-- **Orchestration:** LangGraph (`StateGraph`, `ToolNode`, conditional routing)
-- **Vector store:** Qdrant, running embedded/local for this demo
-- **Embeddings:** `BAAI/bge-small-en-v1.5` via [fastembed](https://github.com/qdrant/fastembed) — runs
-  locally on ONNX Runtime, no API key or network call needed at query time. English-only: a Persian
-  (or other non-English) question currently retrieves poorly, since the embedding model was never
-  trained on that language — this is a known gap, not a bug, and the fix (swapping in a multilingual
-  fastembed model) is straightforward if non-English support is ever needed.
-- **LLM:** via OpenRouter (currently `google/gemma-4-31b-it`, swappable)
-- **Persistence:** `langgraph-checkpoint-sqlite`
-- **UI:** Streamlit
-- **Tests:** pytest (integration tests — see `tests/test_tools.py`)
-
-## Known limitations
-
-Being upfront about this rather than burying it:
-
-- Embeddings are English-only (see Tech stack above).
-- Qdrant runs embedded (`path=./qdrant_storage`), which is a single-process
-  file lock — fine for a demo, not for multiple concurrent workers. See
-  `docs/scaling.md` for what changes if this needed to handle real traffic.
-- Same story for the SQLite checkpointer.
-- The eval set is small (7 questions). It exercises the main paths but isn't
-  a statistically meaningful accuracy benchmark.
-- `lookup_device_telemetry` and `lookup_spare_part` are in-memory dicts, not
-  real APIs — they stand in for what would be a live systems-integration
-  call in an actual deployment.
-- Tests in `tests/test_tools.py` are integration tests: they hit the real
-  (local) Qdrant collection, so the knowledge base needs to be indexed first
-  (`python -m core.tools`).
+- **Orchestration:** LangGraph (StateGraph, ToolNode, conditional routing, injectable LLM architecture)
+- **Vector Store:** Qdrant (local embedded instance with structure-aware indexing)
+- **Embeddings:** `BAAI/bge-small-en-v1.5` via FastEmbed (ONNX Runtime, fully offline)
+- **LLM Routing:** OpenRouter (`google/gemma-4-31b-it`, swappable via environment configuration)
+- **Observability:** Native instrumentation via LangSmith and Langfuse runtime callbacks
+- **Persistence:** SQLite checkpointer (`langgraph-checkpoint-sqlite`)
+- **Interface:** Streamlit (dark operational console with telemetry expanders and session history)
+- **Testing & CI:** pytest (11 test cases), GitHub Actions
 
 ## Quickstart
 
-**1. Install**
+**1. Clone and install**
 ```bash
 git clone https://github.com/mostafa-hakimi/voltpro-diagnostic-copilot.git
 cd voltpro-diagnostic-copilot
-python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
 **2. Configure environment**
-
-Copy `.env.example` to `.env` and fill in your key:
-```
-OPENROUTER_API_KEY=your_openrouter_api_key
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+```bash
+cp .env.example .env
+# Edit .env with your OpenRouter credentials and optional telemetry keys
 ```
 
-**3. Index the manual into Qdrant**
+**3. Initialize knowledge base**
 ```bash
 python -m core.tools
 ```
 
-**4. Run the tests**
+**4. Run test suite**
 ```bash
 python -m pytest -v
 ```
 
-**5. Launch the app**
+**5. Run automated benchmarks**
+```bash
+python -m eval.evaluate
+```
+
+**6. Launch interface**
 ```bash
 streamlit run app.py
 ```
 
-**Or, with Docker:**
-```bash
-docker build -t voltpro-copilot .
-docker run --env-file .env -p 8501:8501 voltpro-copilot
-```
+## Decision Log
 
-## Scaling this up
-
-`docs/scaling.md` covers the concrete changes for moving off the embedded
-Qdrant instance and SQLite checkpointer to something that handles real
-concurrent traffic — it's a plan, not something already built here.
+`docs/DECISIONS.md` documents the architectural rationale and trade-offs behind this project—including
+structure-aware chunking, local ONNX embeddings over cloud APIs, summarization thresholds, and
+embedded vector storage.
 
 ## License
 

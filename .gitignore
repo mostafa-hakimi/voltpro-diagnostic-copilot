@@ -1,7 +1,10 @@
 .env
+.venv/
 __pycache__/
 *.pyc
-.venv/
 .pytest_cache/
-qdrant_storage/
 customer_support.db
+customer_support.db-*
+qdrant_storage/
+*.zip
+.DS_Store

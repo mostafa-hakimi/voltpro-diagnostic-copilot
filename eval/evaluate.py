@@ -1,3 +1,5 @@
+from core.observability import setup_observability, get_telemetry_callbacks, flush_telemetry
+setup_observability()
 import json
 import time
 import uuid
@@ -30,6 +32,7 @@ def run_evaluation():
         config = {
             "configurable": {"thread_id": f"eval_{uuid.uuid4()}"},
             "recursion_limit": 25,
+            "callbacks": get_telemetry_callbacks(),
         }
 
         start_time = time.time()
@@ -74,3 +77,5 @@ def run_evaluation():
 
 if __name__ == "__main__":
     run_evaluation()
+
+    flush_telemetry()
