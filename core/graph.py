@@ -53,7 +53,7 @@ def build_graph(llm=None, checkpointer=None):
         llm = ChatOpenAI(
             model=os.getenv("LLM_MODEL", "google/gemma-4-31b-it"),
             base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-            api_key=os.getenv("OPENROUTER_API_KEY"),
+            api_key=os.getenv("OPENROUTER_API_KEY") or "mock-key-for-ci",
             temperature=0,
         )
 
